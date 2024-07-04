@@ -1,0 +1,26 @@
+model:
+  image_size: 224
+  patch_size: 16
+  emb_dim: 768
+  num_layers_encoder: 12
+  num_layers_decoder: 4
+  num_heads_encoder: 12
+  num_heads_decoder: 6
+  mask_ratio: 0.75
+  n_channels: 4
+
+training:
+  batch_size: 32
+  epochs: 100
+  learning_rate: 1e-4
+  weight_decay: 1e-4
+  alpha: 1.0
+  beta: 1.0
+
+data:
+  train_dir: /home/ndelafuente/Desktop/D-MAE/data/data/train
+  val_dir: /home/ndelafuente/Desktop/D-MAE/data/data/val
+  depth_model_checkpoint: /home/ndelafuente/Desktop/D-MAE/depth_anything_v2/checkpoints/depth_anything_v2_vitb.pth
+
+logging:
+  wandb_project: depth_informed_mae
