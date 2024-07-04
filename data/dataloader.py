@@ -69,9 +69,8 @@ if __name__ == "__main__":
     val_depth_dir = config['data']['val_dir'] + '/depth'
     batch_size = config['training']['batch_size']
 
-    train_loader = get_dataloaders(train_image_dir, train_depth_dir, val_image_dir, val_depth_dir, batch_size) 
+    train_loader, val_loader = get_dataloaders(train_image_dir, train_depth_dir, val_image_dir, val_depth_dir, batch_size) 
 
     for images in train_loader:
         print(images.shape)
         break
-
