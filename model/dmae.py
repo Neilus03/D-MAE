@@ -1,7 +1,11 @@
 import torch
 import torch.nn as nn
 import numpy as np
-from vit import ViTFeatureExtractor, PatchEmbedding, TransformerEncoder, PositionalEncoding
+import sys, os
+
+sys.path.append(os.path.join(os.path.dirname(__file__), '../'))
+
+from model.vit import ViTFeatureExtractor, PatchEmbedding, TransformerEncoder, PositionalEncoding
 
 
 class RandomMasking(nn.Module):
@@ -186,7 +190,7 @@ class MAE(nn.Module):
         # Decode patches
         pred = self.decoder(x, ids_restore)
         return pred, mask
-
+"""
 def mae_loss(pred, target, mask):
     '''
     MAE loss function:
@@ -216,7 +220,29 @@ def mae_loss(pred, target, mask):
 
     loss = loss_rgb + loss_depth
 
+    return loss, loss_rgb, loss_depth'''
+"""    
+def mae_loss(pred, target, mask):
+    # Reshape target to match pred shape
+    B, C, H, W = target.shape
+    P = int(H / 16)  # Assuming 16x16 patches
+    target = target.reshape(B, C, P, 16, P, 16).permute(0, 2, 4, 1, 3, 5).reshape(B, P*P, 16*16*C)
+
+    pred_rgb = pred[:, :, :-256]  # Assuming last 256 values are for depth (16x16)
+    pred_depth = pred[:, :, -256:]
+    target_rgb = target[:, :, :-256]
+    target_depth = target[:, :, -256:]
+
+    loss_rgb = ((pred_rgb - target_rgb) ** 2).mean(dim=-1)  # [N, L], mean loss per patch
+    loss_depth = ((pred_depth - target_depth) ** 2).mean(dim=-1)  # [N, L], mean loss per patch
+
+    loss_rgb = (loss_rgb * mask).sum() / mask.sum()  # Mean loss on removed patches
+    loss_depth = (loss_depth * mask).sum() / mask.sum()  # Mean loss on removed patches
+
+    loss = loss_rgb + loss_depth
+
     return loss, loss_rgb, loss_depth
+
 
 if __name__ == "__main__":
     import yaml
