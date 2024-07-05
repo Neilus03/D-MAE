@@ -44,7 +44,7 @@ class PatchEmbedding(nn.Module):
         x = x.flatten(2) # (B, d_model, P_col, P_row) -> (B, d_model, P_col*P_row) 
         #rearrange the patches to (B, P_col*P_row, d_model)
         x = x.transpose(1, 2) # (B, d_model, P_col*P_row) -> (B, P_col*P_row, d_model)
-        #return the new tensor 
+        #return the new tensor
         return x  #(B, P_col*P_row, d_model)
         
 
@@ -54,7 +54,7 @@ class PositionalEncoding(nn.Module):
     Positional Encoding class:
         This class is used to add positional encoding to the patches
     '''
-    def __init__(self, d_model, max_seq_len, include_cls_token=True):
+    def __init__(self, d_model, max_seq_len, include_cls_token=False):
         '''
         __init__ function:
             This function is used to initialize the PositionalEncoding class
@@ -292,7 +292,7 @@ class ViTFeatureExtractor(nn.Module):
     ViTFeatureExtractor class:
         This class is used to build the vision transformer model ready to extract features
     '''
-    def __init__(self, d_model, img_size, patch_size, n_channels, n_heads, n_layers):
+    def __init__(self, d_model, img_size, patch_size, n_channels, n_heads, n_layers, include_cls_token=False):
         '''
         __init__ function:
             This function is used to initialize the ViTFeatureExtractor class
@@ -319,9 +319,11 @@ class ViTFeatureExtractor(nn.Module):
         #number of patches in the image
         self.n_patches = (img_size[0] * img_size[1]) // (patch_size[0] * patch_size[1])
         
-        #set max sequence length to the number of patches + 1 (cls token)
-        self.max_seq_len = self.n_patches + 1
-        
+        #set max sequence length to the number of patches + 1 (cls token) if cls token is included
+        if include_cls_token:
+            self.max_seq_len = self.n_patches + 1
+        else:
+            self.max_seq_len = self.n_patches
         #patch embedding layer
         self.patch_embedding = PatchEmbedding(self.d_model, img_size, patch_size, n_channels)
         
@@ -342,15 +344,35 @@ class ViTFeatureExtractor(nn.Module):
         Returns:
             x: Output of the vision transformer model (B, n_classes)
         '''
+        
+        print(f"ViTFeatureExtractor input shape: {x.shape}")
+        
         #patch embedding layer
         x = self.patch_embedding(x)
+        
+        print(f"PatchEmbedding output shape: {x.shape}")
         
         #positional encoding layer
         x = self.positional_encoding(x)
         
+        print(f"PositionalEncoding output shape: {x.shape}")
+        
         #transformer encoder layers
         x = self.transformer_encoder(x)
+        
+        print(f"TransformerEncoder output shape: {x.shape}")
         
         #return the new tensor
         return x
   
+  
+#Checking the ViTFeatureExtractor class
+if __name__ == "__main__":
+    #creating a random image tensor
+    x = torch.randn(1, 3, 224, 224)
+    #creating the ViTFeatureExtractor model
+    vit_extractor = ViTFeatureExtractor(d_model=512, img_size=(224, 224), patch_size=(16, 16), n_channels=3, n_heads=8, n_layers=8, include_cls_token=True)
+    #passing the image through the model
+    output = vit_extractor(x)
+    #printing the output shape
+    print(f"ViTFeatureExtractor output shape: {output.shape}")
