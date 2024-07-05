@@ -1,7 +1,7 @@
 model:
-  image_size: 224
-  patch_size: 16
-  emb_dim: 768
+  image_size: [224, 224]
+  patch_size: [16, 16]
+  d_model: 768
   num_layers_encoder: 12
   num_layers_decoder: 4
   num_heads_encoder: 12
