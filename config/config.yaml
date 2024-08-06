@@ -1,26 +1,32 @@
 model:
   image_size: [224, 224]
-  patch_size: [16, 16]
-  d_model: 768
-  num_layers_encoder: 12
-  num_layers_decoder: 4
-  num_heads_encoder: 12
-  num_heads_decoder: 6
+  patch_size: 16
+  d_model: 768 #768
+  num_layers_encoder: 12 #12
+  num_layers_decoder: 4 #4
+  num_heads_encoder: 8 #12
+  num_heads_decoder: 6 #8
   mask_ratio: 0.75
   n_channels: 4
 
 training:
-  batch_size: 32
+  batch_size: 16
   epochs: 100
-  learning_rate: 1e-4
-  weight_decay: 1e-4
+  learning_rate: 0.00003
+  weight_decay: 0.0001
   alpha: 1.0
   beta: 1.0
+  mask_ratio: 0.75
 
 data:
   train_dir: /home/ndelafuente/Desktop/D-MAE/data/data/train
   val_dir: /home/ndelafuente/Desktop/D-MAE/data/data/val
   depth_model_checkpoint: /home/ndelafuente/Desktop/D-MAE/depth_anything_v2/checkpoints/depth_anything_v2_vitb.pth
+  depth_stats:
+    mean: 4.6975
+    std: 3.8411
 
 logging:
   wandb_project: depth_informed_mae
+  wandb_entity: neilus03
+  model_save_dir: /home/ndelafuente/Desktop/D-MAE/depth_informed_mae/pretrain/checkpoints
