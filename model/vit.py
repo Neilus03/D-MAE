@@ -369,9 +369,9 @@ class ViTFeatureExtractor(nn.Module):
 #Checking the ViTFeatureExtractor class
 if __name__ == "__main__":
     #creating a random image tensor
-    x = torch.randn(1, 3, 224, 224)
+    x = torch.randn(16, 4, 224, 224)
     #creating the ViTFeatureExtractor model
-    vit_extractor = ViTFeatureExtractor(d_model=512, img_size=(224, 224), patch_size=(16, 16), n_channels=3, n_heads=8, n_layers=8, include_cls_token=False)
+    vit_extractor = ViTFeatureExtractor(d_model=512, img_size=(224, 224), patch_size=(16, 16), n_channels=4, n_heads=8, n_layers=8, include_cls_token=False)
     #passing the image through the model
     output = vit_extractor(x)
     #printing the output shape
