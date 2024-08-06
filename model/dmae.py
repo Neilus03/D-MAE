@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 import sys, os, yaml
+import matplotlib.pyplot as plt
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '../'))
 
@@ -65,6 +66,72 @@ class RandomMasking(nn.Module):
 
         return x_masked, mask, ids_restore
 
+def unpatchify(patches, img_size=(224,224), patch_size=16, original_num_patches=196):
+    '''
+    Reconstructs the image from patches.
+    
+    Args:
+        patches (torch.Tensor): The output patches from the decoder
+                                (shape: [batch_size, num_patches, patch_size*patch_size*num_channels]).
+        img_size (tuple): The original image size (height, width).
+        patch_size (int): The size of each patch (assuming square patches).
+        
+    Returns:
+        torch.Tensor: The reconstructed image (shape: [batch_size, 3, height, width]).
+        torch.Tensor: The reconstructed depth map (shape: [batch_size, 1, height, width]).
+
+    '''
+    batch_size, num_patches, patch_elements = patches.shape
+    num_channels_rgb = 3
+    num_channels_depth = 1
+
+    # Calculate the number of patches in each dimension for the original image
+    num_patches_height = img_size[0] // patch_size
+    num_patches_width = img_size[1] // patch_size
+
+    # Calculate the elements per patch for RGB and depth
+    patch_elements_rgb = patch_size * patch_size * num_channels_rgb
+    patch_elements_depth = patch_size * patch_size * num_channels_depth
+
+    # Separate RGB and depth patches
+    patches_rgb = patches[:, :, :patch_elements_rgb]
+    patches_depth = patches[:, :, patch_elements_rgb:patch_elements_rgb + patch_elements_depth]
+
+    print(f"Unpatchify - RGB patches shape before reshaping: {patches_rgb.shape}")
+    print(f"Unpatchify - Depth patches shape before reshaping: {patches_depth.shape}")
+
+    # Reshape patches to match the original image dimensions
+    patches_rgb = patches_rgb.reshape(batch_size, num_patches, patch_size, patch_size, num_channels_rgb)
+    patches_rgb = patches_rgb.permute(0, 1, 3, 2, 4).contiguous()
+    
+    # Create a tensor of zeros for the full image and fill in the visible patches
+    full_patches_rgb = torch.zeros(batch_size, original_num_patches, patch_size, patch_size, num_channels_rgb, device=patches_rgb.device)
+    full_patches_rgb[:, :num_patches] = patches_rgb
+    
+    # Reshape to the original image dimensions
+    reconstructed_rgb = full_patches_rgb.reshape(batch_size, num_patches_height, num_patches_width, patch_size, patch_size, num_channels_rgb)
+    reconstructed_rgb = reconstructed_rgb.permute(0, 5, 1, 3, 2, 4).contiguous()
+    reconstructed_rgb = reconstructed_rgb.reshape(batch_size, num_channels_rgb, img_size[0], img_size[1])
+
+    # Repeat the process for depth patches
+    if patches_depth.shape[2] > 0:
+        patches_depth = patches_depth.reshape(batch_size, num_patches, patch_size, patch_size, num_channels_depth)
+        patches_depth = patches_depth.permute(0, 1, 3, 2, 4).contiguous()
+        
+        full_patches_depth = torch.zeros(batch_size, original_num_patches, patch_size, patch_size, num_channels_depth, device=patches_depth.device)
+        full_patches_depth[:, :num_patches] = patches_depth
+        
+        reconstructed_depth = full_patches_depth.reshape(batch_size, num_patches_height, num_patches_width, patch_size, patch_size, num_channels_depth)
+        reconstructed_depth = reconstructed_depth.permute(0, 5, 1, 3, 2, 4).contiguous()
+        reconstructed_depth = reconstructed_depth.reshape(batch_size, num_channels_depth, img_size[0], img_size[1])
+    else:
+        reconstructed_depth = torch.zeros(batch_size, num_channels_depth, img_size[0], img_size[1], device=patches_rgb.device)
+
+    print(f"Unpatchify - RGB image shape after reshaping: {reconstructed_rgb.shape}")
+    print(f"Unpatchify - Depth image shape after reshaping: {reconstructed_depth.shape}")
+
+    return reconstructed_rgb, reconstructed_depth
+
 class MAEEncoder(nn.Module):
     '''
     MAE Encoder class:
@@ -84,7 +151,7 @@ class MAEEncoder(nn.Module):
         '''
         super().__init__()
         self.patch_embed = PatchEmbedding(d_model, img_size, patch_size, n_channels)
-        self.positional_encoding = PositionalEncoding(d_model, (img_size[0] // patch_size[0]) * (img_size[1] // patch_size[1]))
+        self.positional_encoding = PositionalEncoding(d_model, (img_size[0] // patch_size) * (img_size[1] // patch_size))
         self.transformer_encoder = nn.Sequential(*[TransformerEncoder(d_model, n_heads, n_layers) for _ in range(n_layers)])
 
     def forward(self, x):
@@ -126,7 +193,15 @@ class MAEDecoder(nn.Module):
             for _ in range(n_layers)
         ])
         self.decoder_norm = nn.LayerNorm(d_model)
-        self.decoder_pred = nn.Linear(d_model, patch_size[0] * patch_size[1] * num_channels)
+        self.decoder_pred = nn.Linear(d_model, patch_size * patch_size * num_channels)
+    
+    def get_decoder_pred(self):
+        '''
+        get_decoder_pred function accessible from outside the class
+        Returns:
+            self.decoder_pred: Linear layer for prediction
+        '''
+        return self.decoder_pred
 
     def forward(self, x, ids_restore):
         '''
@@ -186,8 +261,11 @@ class MAE(nn.Module):
         super().__init__()
         self.random_masking = RandomMasking(mask_ratio)
         self.encoder = MAEEncoder(d_model, img_size, patch_size, n_channels, n_heads_encoder, n_layers_encoder)
-        num_patches = (img_size[0] // patch_size[0]) * (img_size[1] // patch_size[1]) # for 224x224 image and 16x16 patches, num_patches = 196, 49 visible and 147 masked
+        num_patches = (img_size[0] // patch_size) * (img_size[1] // patch_size) # for 224x224 image and 16x16 patches, num_patches = 196, 49 visible and 147 masked
         self.decoder = MAEDecoder(d_model, num_patches, patch_size, n_channels, n_layers_decoder, n_heads_decoder)
+    
+    def get_decoder_pred(self):
+        return self.decoder.get_decoder_pred()
 
     def forward(self, x):
         '''
@@ -203,24 +281,27 @@ class MAE(nn.Module):
         
         print(f"MAE - Input image shape: {x.shape}")
         # Apply patch embedding
-        x = self.encoder.patch_embed(x)
-        print(f"MAE - After patch embedding: {x.shape}")
-
-        #Apply positional encoding BEFORE masking for avoiding shape mismatch later on
-        x = self.encoder.positional_encoding(x)
+        x_patched = self.encoder.patch_embed(x)
+        print(f"MAE - After patch embedding: {x_patched.shape}")
+        
+        # Apply positional encoding BEFORE masking
+        x = self.encoder.positional_encoding(x_patched)
         print(f"MAE - After positional encoding: {x.shape}")
         
-        # Apply masking to the patches 
+        # Apply masking to the patches
         x, mask, ids_restore = self.random_masking(x)
-
-        # Encode the masked patches 
-        x_encoded = self.encoder(x) 
-
+        
+        # Encode the masked patches
+        x_encoded = self.encoder(x)
+        
         # Decode patches
         pred = self.decoder(x_encoded, ids_restore)
         print(f"MAE - Reconstructed patches shape: {pred.shape}")
-
-        return pred, mask, ids_restore
+        
+        # Unpatchify the patches to reconstruct the image and depth map
+        reconstructed_image, reconstructed_depth = unpatchify(pred, img_size=config['model']['image_size'], patch_size=config['model']['patch_size'])
+        
+        return pred, mask, ids_restore, reconstructed_image, reconstructed_depth, x_patched
     
 def mae_loss(pred, target, mask, alpha=1.0, beta=1.0):
     """
@@ -243,31 +324,56 @@ def mae_loss(pred, target, mask, alpha=1.0, beta=1.0):
             - loss_rgb (torch.Tensor): The MAE loss for RGB channels.
             - loss_depth (torch.Tensor): The MAE loss for the depth channel.
     """
+    print(f"MAE LOSS - pred shape: {pred.shape}")
+    print(f"MAE LOSS - target shape: {target.shape}")
+    print(f"MAE LOSS - mask shape: {mask.shape}")
+
+    patch_size = config['model']['patch_size']
+    num_channels_rgb = 3
+    num_channels_depth = 1
+    
+    # Calculate the elements per patch for RGB and depth
+    patch_elements_rgb = patch_size * patch_size * num_channels_rgb
+    patch_elements_depth = patch_size * patch_size * num_channels_depth
+    print(f"MAE LOSS - Patch elements RGB: {patch_elements_rgb}")
+    print(f"MAE LOSS - Patch elements Depth: {patch_elements_depth}")
+    
+    assert target.shape[-1] == patch_elements_rgb + patch_elements_depth, f"Target should contain both RGB and depth information. Expected {patch_elements_rgb + patch_elements_depth}, got {target.shape[-1]}"
+    #assert target.shape[-1] == patch_elements_rgb + patch_elements_depth, "Target should contain both RGB and depth information"
 
     # Extract RGB and depth predictions and targets from patches
-    pred_rgb = pred[:, :, :-256]  # RGB values from reconstructed patches
-    pred_depth = pred[:, :, -256:]  # Depth values from reconstructed patches
-    target_rgb = target[:, :, :-256]  # RGB values from original patches
-    target_depth = target[:, :, -256:]  # Depth values from original patches
-
+    pred_rgb = pred[:, :, :patch_elements_rgb]
+    pred_depth = pred[:, :, patch_elements_rgb:patch_elements_rgb + patch_elements_depth]
+    print(f"MAE LOSS - pred_rgb shape: {pred_rgb.shape}")
+    print(f"MAE LOSS - pred_depth shape: {pred_depth.shape}")
+        
+    # Decode the target to match the shape of the pred
+    target_rgb = target[:, :, :patch_elements_rgb]
+    target_depth = target[:, :, patch_elements_rgb:patch_elements_rgb + patch_elements_depth]
+    print(f"MAE LOSS - target_rgb shape: {target_rgb.shape}")
+    print(f"MAE LOSS - target_depth shape: {target_depth.shape}")
+    print(f"MAE LOSS - target shape: {target.shape}")
+    
     # Calculate mean squared error (MSE) for RGB and depth 
     loss_rgb = ((pred_rgb - target_rgb) ** 2).mean(dim=-1)  # Mean per-patch MSE for RGB
     loss_depth = ((pred_depth - target_depth) ** 2).mean(dim=-1)  # Mean per-patch MSE for depth
+    print(f"MAE LOSS - Loss RGB shape: {loss_rgb.shape}")
+    print(f"MAE LOSS - Loss Depth shape: {loss_depth.shape}")
 
     # Apply the mask to focus the loss on the masked patches
     loss_rgb = (loss_rgb * mask).sum() / mask.sum()  # Mean masked MSE for RGB
     loss_depth = (loss_depth * mask).sum() / mask.sum()  # Mean masked MSE for depth
+    print(f"MAE LOSS - Loss RGB after mask: {loss_rgb}")
+    print(f"MAE LOSS - Loss Depth after mask: {loss_depth}")
 
     # Calculate the total weighted loss
     loss = loss_rgb * alpha + loss_depth * beta
+    print(f"MAE LOSS - Total loss: {loss}")
+    print(f"MAE LOSS - Total loss shape: {loss.shape}")
 
     return loss, loss_rgb, loss_depth
 
 if __name__ == "__main__":
-    # --- Shape Verification and Visualization ---
-    import yaml
-    import matplotlib.pyplot as plt
-
     # Load configuration
     config_path = '/home/ndelafuente/Desktop/D-MAE/config/config.yaml'
     with open(config_path, 'r') as file:
@@ -277,31 +383,51 @@ if __name__ == "__main__":
     batch_size = config['training']['batch_size']
     img_size = config['model']['image_size']
     patch_size = config['model']['patch_size']
-    n_channels = config['model']['n_channels'] # RGB + depth
+    n_channels = config['model']['n_channels']  # RGB + depth
     d_model = config['model']['d_model']
 
     # Create random input tensor
-    x = torch.randn(batch_size, n_channels, img_size[0], img_size[1])
+    #x = torch.randn(batch_size, n_channels, img_size[0], img_size[1])
+    
+    #instead of creating a random tensor, load an image and depth map using the dataloader
+    from data.dataloader import get_dataloaders
+    train_loader, val_loader = get_dataloaders(config)
+    for batch in train_loader:
+        x = batch
+        print(f"Batch shape: {x.shape}")
+        print(f"Batch type: {type(x)}")
+        print(f"Batch[0]: {x[0][:1]}")
+        break
+    
 
     # Initialize MAE model
     mae_model = MAE(d_model, img_size, patch_size, n_channels)
 
     # --- Forward Pass and Shape Checks ---
     print("=== Forward Pass ===")
-    pred, mask, ids_restore = mae_model(x)
+    pred, mask, ids_restore, reconstructed_image, reconstructed_depth, x_patched = mae_model(x)
+    
 
     print("\n=== Shape Verification ===")
     print(f"Input shape: {x.shape}")
     print(f"Prediction (Reconstructed Patches) shape: {pred.shape}")
     print(f"Mask shape: {mask.shape}")
     print(f"ids_restore shape: {ids_restore.shape}")
+    print(f"Reconstructed Image shape: {reconstructed_image.shape}")
+    print(f"Reconstructed Depth shape: {reconstructed_depth.shape}")
 
     # --- Loss Calculation (Optional) ---
-    target = torch.randn_like(pred)  # Mock target for shape testing
+    target = mae_model.encoder.patch_embed(x)
+    target = mae_model.decoder.decoder_pred(target)  # This transforms the target to match pred's shape
+    print(f"Target shape: {target.shape}")
+    print(f"Prediction shape: {pred.shape}")
+
+    # Ensure target_rgb and target_depth match the shapes of pred_rgb and pred_depth
     loss, loss_rgb, loss_depth = mae_loss(pred, target, mask)
+
     print(f"Loss: {loss.item():.4f}")
     print(f"RGB Loss: {loss_rgb.item():.4f}")
     print(f"Depth Loss: {loss_depth.item():.4f}")
-    
-    # --- Visualization (Optional) ---
-    #to-do: add visualization code here
+
+    # --- Visualization ---
+    #TODO: Add visualization code here
