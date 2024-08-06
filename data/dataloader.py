@@ -64,6 +64,16 @@ class CustomDataset(Dataset):
         return image_depth
 
 def get_dataloaders(config):
+    '''
+    Creates PyTorch DataLoader objects for the training and validation datasets
+    
+    Args:
+        config: Dictionary containing configuration parameters
+    
+    Returns:
+        train_loader: DataLoader object for the training dataset
+        val_loader: DataLoader object for the validation dataset
+    '''
     image_size = tuple(config['model']['image_size'])
     batch_size = config['training']['batch_size']
     train_dir = config['data']['train_dir']
@@ -97,10 +107,53 @@ def get_dataloaders(config):
     return train_loader, val_loader
 
 def denormalize_RGB(tensor):
+    '''
+    Denormalizes a tensor containing an RGB image
+    
+    '''
+    if isinstance(tensor, np.ndarray):
+        tensor = torch.from_numpy(tensor)
+    
     mean = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1)
     std = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1)
     return tensor * std + mean
 
+def denormalize_RGB(tensor):
+    '''
+    Denormalizes the RGB channels of a tensor containing an RGB or RGB-D image
+    '''
+    if isinstance(tensor, np.ndarray):
+        tensor = torch.from_numpy(tensor)
+    
+    print(f'DENORMALIZE - input tensor shape: {tensor.shape}')
+    
+    mean = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1)
+    std = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1)
+    
+    print(f'DENORMALIZE - mean shape: {mean.shape}')
+    print(f'DENORMALIZE - std shape: {std.shape}')
+
+    # Check if the input is a 4D tensor (batch, channels, height, width)
+    if tensor.dim() == 4:
+        # Only denormalize the first 3 channels (RGB)
+        denormalized_rgb = tensor[:, :3] * std + mean
+        
+        # If there's a depth channel, keep it unchanged
+        if tensor.shape[1] == 4:
+            denormalized_tensor = torch.cat([denormalized_rgb, tensor[:, 3:]], dim=1)
+        else:
+            denormalized_tensor = denormalized_rgb
+    else:
+        # For 3D tensors (single image)
+        if tensor.shape[0] == 4:
+            denormalized_rgb = tensor[:3] * std + mean
+            denormalized_tensor = torch.cat([denormalized_rgb, tensor[3:]], dim=0)
+        else:
+            denormalized_tensor = tensor * std + mean
+    
+    print(f'DENORMALIZE - denormalized_tensor shape: {denormalized_tensor.shape}')
+    
+    return denormalized_tensor
 
 ###########################################################################
 # ANALYZE THE MEAN AND STD OF THE DEPTH MAPS TO NOW HOW TO NORMALIZE THEM #
