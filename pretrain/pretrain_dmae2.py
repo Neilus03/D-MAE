@@ -93,6 +93,11 @@ def train_one_epoch(model, dataloader, optimizer, device):
             beta=config['training']['beta']
         )
         
+        #Log the batch loss to wandb
+        wandb.log({"general batch_loss": loss.item()})
+        wandb.log({"rgb batch_loss": rgb_loss.item()})
+        wandb.log({"depth batch_loss": depth_loss.item()})
+        
         # Backward pass and optimize
         loss.backward()
         optimizer.step()
