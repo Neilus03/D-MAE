@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 
-
+ 
 #Creating the PatchEmbedding class
 class PatchEmbedding(nn.Module):
     '''
