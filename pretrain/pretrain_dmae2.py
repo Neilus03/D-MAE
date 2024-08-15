@@ -9,6 +9,7 @@ import sys
 from tqdm import tqdm
 import logging
 import matplotlib.pyplot as plt
+import torch.nn.functional as F
 
 # Add project root to path
 sys.path.append(os.path.join(os.path.dirname(__file__), '../'))
@@ -44,35 +45,13 @@ def count_parameters(model):
     '''
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
-def visualize_reconstruction(original, reconstructed, epoch, save_dir):
-    '''
-    Visualizes and saves the original and reconstructed images
-    '''
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 6))
-    
-    # Denormalize and convert to numpy array
-    original = denormalize_RGB(original.cpu()).permute(1, 2, 0).numpy()
-    reconstructed = denormalize_RGB(reconstructed.cpu()).permute(1, 2, 0).numpy()
-    
-    ax1.imshow(original)
-    ax1.set_title("Original")
-    ax1.axis('off')
-    
-    ax2.imshow(reconstructed)
-    ax2.set_title("Reconstructed")
-    ax2.axis('off')
-    
-    plt.tight_layout()
-    plt.savefig(os.path.join(save_dir, f'reconstruction_epoch_{epoch}.png'))
-    plt.close()
-
 def train_one_epoch(model, dataloader, optimizer, device):
     model.train()
     total_loss = 0
     total_rgb_loss = 0
     total_depth_loss = 0
 
-    for batch in tqdm(dataloader, desc="Training"):
+    for batch_idx, batch in enumerate(tqdm(dataloader, desc="Training")):
         optimizer.zero_grad()
         
         # Move batch to device
@@ -83,7 +62,12 @@ def train_one_epoch(model, dataloader, optimizer, device):
         
         # Create target
         target = model.decoder.decoder_pred(x_patched)
-        
+
+        # Visualize the first batch in each epoch
+        if batch_idx % 10 == 0:
+            visualize_reconstruction(batch[0], reconstructed_image[0], reconstructed_depth[0], mask, epoch=0)
+
+
         # Calculate loss
         loss, rgb_loss, depth_loss = mae_loss(
             pred, 
@@ -93,7 +77,7 @@ def train_one_epoch(model, dataloader, optimizer, device):
             beta=config['training']['beta']
         )
         
-        #Log the batch loss to wandb
+        # Log the batch loss to wandb
         wandb.log({"general batch_loss": loss.item()})
         wandb.log({"rgb batch_loss": rgb_loss.item()})
         wandb.log({"depth batch_loss": depth_loss.item()})
@@ -112,6 +96,69 @@ def train_one_epoch(model, dataloader, optimizer, device):
     
     return avg_loss, avg_rgb_loss, avg_depth_loss
 
+
+def visualize_reconstruction(original, reconstructed_image, reconstructed_depth, mask, epoch):
+    '''
+    Visualizes the original, masked, and reconstructed images and depth maps and logs them to WandB.
+    
+    Args:
+        original (torch.Tensor): The original input image tensor, which includes RGB and depth channels.
+        reconstructed_image (torch.Tensor): The reconstructed RGB image tensor output from the model.
+        reconstructed_depth (torch.Tensor): The reconstructed depth map tensor output from the model.
+        mask (torch.Tensor): The mask tensor indicating which patches were masked during training.
+        epoch (int): The current epoch number, used for logging in WandB.
+    '''
+    # Create a 2x2 grid of subplots for displaying the images
+    fig, axs = plt.subplots(2, 2, figsize=(12, 12))
+
+    # Check the dimensionality of the original input tensor
+    # If it is 4D (batch of images), extract the first image for visualization
+    if original.dim() == 4:
+        original_rgb = denormalize_RGB(original[:, :3, :, :].cpu()).permute(1, 2, 0).numpy()  # Extract and denormalize RGB channels
+        original_depth = original[:, 3, :, :].cpu().numpy()  # Extract the depth channel
+    elif original.dim() == 3:
+        # If the tensor is 3D, directly process it as a single image
+        original_rgb = denormalize_RGB(original[:3, :, :].cpu()).permute(1, 2, 0).numpy()  # Extract and denormalize RGB channels
+        original_depth = original[3, :, :].cpu().numpy()  # Extract the depth channel
+
+    # Process the reconstructed images
+    # Denormalize the reconstructed RGB image and move the channels to the last dimension
+    reconstructed_rgb = denormalize_RGB(reconstructed_image.detach().cpu()).permute(1, 2, 0).numpy()
+    
+    # Squeeze the reconstructed depth map to remove unnecessary dimensions
+    reconstructed_depth = reconstructed_depth.detach().cpu().squeeze().numpy()  # Squeeze depth to (224, 224)
+
+    # Plot the original RGB image
+    axs[0, 0].imshow(original_rgb)
+    axs[0, 0].set_title("Original RGB Image")
+    axs[0, 0].axis('off')  # Turn off the axis for better visualization
+
+    # Plot the original depth map
+    axs[1, 0].imshow(original_depth, cmap='viridis')  # Use a colormap for depth visualization
+    axs[1, 0].set_title("Original Depth Map")
+    axs[1, 0].axis('off')  # Turn off the axis for better visualization
+
+    # Plot the reconstructed RGB image
+    axs[0, 1].imshow(reconstructed_rgb)
+    axs[0, 1].set_title("Reconstructed RGB Image")
+    axs[0, 1].axis('off')  # Turn off the axis for better visualization
+
+    # Plot the reconstructed depth map
+    axs[1, 1].imshow(reconstructed_depth, cmap='viridis')  # Use a colormap for depth visualization
+    axs[1, 1].set_title("Reconstructed Depth Map")
+    axs[1, 1].axis('off')  # Turn off the axis for better visualization
+
+    # Adjust layout to avoid overlapping and improve spacing
+    plt.tight_layout()
+
+    # Log the entire figure as an image to WandB for visualization and tracking
+    wandb.log({f"Reconstruction at Epoch {epoch}": wandb.Image(fig)})
+
+    # Close the figure to free up memory and avoid display issues
+    plt.close(fig)
+
+    
+    
 def validate(model, dataloader, device):
     model.eval()
     total_loss = 0
@@ -185,9 +232,9 @@ def main():
     # Get dataloaders
     train_loader, val_loader = get_dataloaders(config)
 
-    # Create directory for saving reconstructions
+    '''# Create directory for saving reconstructions
     reconstruction_dir = os.path.join(config['logging']['model_save_dir'], 'reconstructions')
-    os.makedirs(reconstruction_dir, exist_ok=True)
+    os.makedirs(reconstruction_dir, exist_ok=True)'''
 
     # Training loop
     for epoch in range(config['training']['epochs']):
@@ -200,7 +247,7 @@ def main():
         val_loss, val_rgb_loss, val_depth_loss, original_image, reconstructed_image = validate(model, val_loader, device)
         
         # Visualize reconstruction
-        visualize_reconstruction(original_image, reconstructed_image, epoch+1, reconstruction_dir)
+        visualize_reconstruction(original_image, reconstructed_image, epoch+1)
         
         # Log to wandb
         wandb.log({
@@ -211,7 +258,7 @@ def main():
             "val_loss": val_loss,
             "val_rgb_loss": val_rgb_loss,
             "val_depth_loss": val_depth_loss,
-            "reconstruction": wandb.Image(os.path.join(reconstruction_dir, f'reconstruction_epoch_{epoch+1}.png'))
+            #"reconstruction": wandb.Image(os.path.join(reconstruction_dir, f'reconstruction_epoch_{epoch+1}.png'))
         })
         
         # Save model checkpoint

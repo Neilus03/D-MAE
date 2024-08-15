@@ -3,15 +3,19 @@ import torch.nn as nn
 import numpy as np
 import sys, os, yaml
 import matplotlib.pyplot as plt
+import wandb
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '../'))
 
 from model.vit import ViTFeatureExtractor, PatchEmbedding, TransformerEncoder, PositionalEncoding
 from data.dataloader import denormalize_RGB
 
+
 config_path = '/home/ndelafuente/Desktop/D-MAE/config/config.yaml'
 with open(config_path, 'r') as file:
     config = yaml.safe_load(file)
+    
+wandb.init(project=config['logging']['wandb_project'], entity=config['logging']['wandb_entity'])
 
 class RandomMasking(nn.Module):
     '''
@@ -66,7 +70,7 @@ class RandomMasking(nn.Module):
 
         return x_masked, mask, ids_restore
 
-def unpatchify(patches, img_size=(224,224), patch_size=16, original_num_patches=196):
+def unpatchify(patches, img_size=(224,224), patch_size=16, original_num_patches=196, save_dir='./unpatchify_debug'):
     '''
     Reconstructs the image from patches.
     
@@ -100,6 +104,9 @@ def unpatchify(patches, img_size=(224,224), patch_size=16, original_num_patches=
     print(f"Unpatchify - RGB patches shape before reshaping: {patches_rgb.shape}")
     print(f"Unpatchify - Depth patches shape before reshaping: {patches_depth.shape}")
 
+    # Visualize RGB patches for the first image in the batch
+    visualize_patches(patches_rgb[0], patch_size, "RGB", save_dir=save_dir, step=0)
+
     # Reshape patches to match the original image dimensions
     patches_rgb = patches_rgb.reshape(batch_size, num_patches, patch_size, patch_size, num_channels_rgb)
     patches_rgb = patches_rgb.permute(0, 1, 3, 2, 4).contiguous()
@@ -131,6 +138,36 @@ def unpatchify(patches, img_size=(224,224), patch_size=16, original_num_patches=
     print(f"Unpatchify - Depth image shape after reshaping: {reconstructed_depth.shape}")
 
     return reconstructed_rgb, reconstructed_depth
+
+
+def visualize_patches(patches, patch_size, label, save_dir='./unpatchify_debug', step=0):
+    """
+    Visualize the individual patches for debugging.
+    Args:
+        patches (torch.Tensor): Tensor of patches.
+        patch_size (int): Size of each patch.
+        label (str): Label for the plot.
+        save_dir (str): Directory to save the visualization.
+        step (int): Current step/epoch for naming files.
+    """
+    os.makedirs(save_dir, exist_ok=True)
+    num_patches = patches.shape[0]
+    grid_size = int(num_patches ** 0.5)
+    fig, axes = plt.subplots(grid_size, grid_size, figsize=(8, 8))
+    for i in range(grid_size):
+        for j in range(grid_size):
+            # Detach the tensor from the graph and convert it to numpy
+            patch = patches[i * grid_size + j].detach().view(patch_size, patch_size, -1).cpu().numpy()
+            axes[i, j].imshow(patch)
+            axes[i, j].axis('off')
+    plt.suptitle(f"{label} Patches")
+    filename = os.path.join(save_dir, f"{label}_patches_step_{step}.png")
+    plt.savefig(filename)
+    plt.close()
+
+    # Log the image to wandb
+    wandb.log({f"{label} Patches at Step {step}": wandb.Image(filename)})
+
 
 class MAEEncoder(nn.Module):
     '''
