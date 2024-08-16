@@ -11,7 +11,7 @@ from model.vit import ViTFeatureExtractor, PatchEmbedding, TransformerEncoder, P
 from data.dataloader import denormalize_RGB
 
 
-config_path = '/home/ndelafuente/Desktop/D-MAE/config/config.yaml'
+config_path = '/home/ndelafuente/D-MAE/config/config.yaml'
 with open(config_path, 'r') as file:
     config = yaml.safe_load(file)
     

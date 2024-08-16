@@ -23,9 +23,10 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Load configuration
-config_path = '/home/ndelafuente/Desktop/D-MAE/config/config.yaml'
+config_path = '/home/ndelafuente/D-MAE/config/config.yaml'
 with open(config_path, 'r') as file:
     config = yaml.safe_load(file)
+    print(config)
 
 def initialize_weights(m):
     '''
