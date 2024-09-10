@@ -7,3 +7,5 @@
 *.log
 *.pyc
 *.wandb
+/pretrain/wandb/
+/model/pycache/
