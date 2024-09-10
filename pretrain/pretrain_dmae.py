@@ -19,7 +19,7 @@ def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
 # Load configuration
-config_path = '/home/ndelafuente/Desktop/D-MAE/config/config.yaml'
+config_path = '/home/ndelafuente/D-MAE/config/config.yaml'
 with open(config_path, 'r') as file:
     config = yaml.safe_load(file)
 

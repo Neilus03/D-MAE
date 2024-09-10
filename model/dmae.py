@@ -66,7 +66,7 @@ class RandomMasking(nn.Module):
 
         # Apply mask to input
         x_masked = torch.gather(x, dim=1, index=ids_keep.unsqueeze(-1).repeat(1, 1, D)) # Gather the visible patches
-        print(f"RandomMasking -  Masked patches shape: {x_masked.shape}")
+        print(f"RandomMasking -  Unmasked patches shape: {x_masked.shape}")
 
         return x_masked, mask, ids_restore
 
