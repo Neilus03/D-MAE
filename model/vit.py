@@ -317,7 +317,7 @@ class ViTFeatureExtractor(nn.Module):
         self.n_layers = n_layers
         
         #number of patches in the image
-        self.n_patches = (img_size[0] * img_size[1]) // (patch_size[0] * patch_size[1])
+        self.n_patches = (img_size[0] * img_size[1]) // (patch_size[0] * patch_size[1]) # 14*14=196 patches for 224x224 image and 16x16 patch size
         
         #set max sequence length to the number of patches + 1 (cls token) if cls token is included
         if include_cls_token:
@@ -371,7 +371,7 @@ if __name__ == "__main__":
     #creating a random image tensor
     x = torch.randn(16, 4, 224, 224)
     #creating the ViTFeatureExtractor model
-    vit_extractor = ViTFeatureExtractor(d_model=512, img_size=(224, 224), patch_size=(16, 16), n_channels=4, n_heads=8, n_layers=8, include_cls_token=False)
+    vit_extractor = ViTFeatureExtractor(d_model=384, img_size=(224, 224), patch_size=(16, 16), n_channels=4, n_heads=8, n_layers=8, include_cls_token=False)
     #passing the image through the model
     output = vit_extractor(x)
     #printing the output shape

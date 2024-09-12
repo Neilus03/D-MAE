@@ -16,7 +16,7 @@ training:
   weight_decay: 0.0001
   alpha: 1.0
   beta: 1.0
-  mask_ratio: 0.15
+  mask_ratio: 0.75
 
 data:
   train_dir: /home/ndelafuente/D-MAE/data/data/train

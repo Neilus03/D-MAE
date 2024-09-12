@@ -9,3 +9,4 @@
 *.wandb
 /pretrain/wandb/
 /model/pycache/
+/modl/wandb

@@ -44,21 +44,21 @@ class RandomMasking(nn.Module):
             mask: Binary mask (B, L)
             ids_restore: Indices to restore original order (B, L)
         '''
-        N, L, D = x.shape  # batch, length, dim
+        N, L, D = x.shape  # batch size, amount of patches per image , dim of each patch
         len_keep = int(L * (1 - self.mask_ratio))
 
         # Generate random mask
-        noise = torch.rand(N, L, device=x.device)
+        noise = torch.rand(N, L, device=x.device) # Random noise for shuffling
         ids_shuffle = torch.argsort(noise, dim=1)
         ids_restore = torch.argsort(ids_shuffle, dim=1)
 
         # Define ids_keep: Indices of patches to keep
-        ids_keep = ids_shuffle[:, :len_keep] 
+        ids_keep = ids_shuffle[:, :len_keep] # Visible patches
 
         # Create binary mask: 1 is keep, 0 is remove
-        mask = torch.zeros(N, L, device=x.device)
-        mask[:, :len_keep] = 1
-        mask = torch.gather(mask, dim=1, index=ids_restore)
+        mask = torch.zeros(N, L, device=x.device) # Initialize mask with zeros
+        mask[:, :len_keep] = 1 # Set the visible patches to 1 as a flag to keep them unmaksed
+        mask = torch.gather(mask, dim=1, index=ids_restore) # Restore the original order
 
         print(f"RandomMasking - Input patches shape: {x.shape}")
         print(f"RandomMasking - Mask shape: {mask.shape}")
