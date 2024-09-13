@@ -41,111 +41,87 @@ class RandomMasking(nn.Module):
             x: Input patches (B, L, D)
         Returns:
             x_masked: Masked patches (B, L_visible, D)
-            mask: Binary mask (B, L)
+            mask: Binary mask (B, L), where 1 indicates masked patches
             ids_restore: Indices to restore original order (B, L)
         '''
-        N, L, D = x.shape  # batch size, amount of patches per image , dim of each patch
+        N, L, D = x.shape  # Batch size, number of patches, dimension of each patch
         len_keep = int(L * (1 - self.mask_ratio))
 
-        # Generate random mask
-        noise = torch.rand(N, L, device=x.device) # Random noise for shuffling
+        # Generate random noise for shuffling
+        noise = torch.rand(N, L, device=x.device)
+        # Sort noise to get the shuffling indices
         ids_shuffle = torch.argsort(noise, dim=1)
+        # Restore indices to original order
         ids_restore = torch.argsort(ids_shuffle, dim=1)
 
-        # Define ids_keep: Indices of patches to keep
-        ids_keep = ids_shuffle[:, :len_keep] # Visible patches
+        # Select the patches to keep
+        ids_keep = ids_shuffle[:, :len_keep]
+        # Create the binary mask (1 for masked patches, 0 for visible patches)
+        mask = torch.ones(N, L, device=x.device)
+        mask[:, :len_keep] = 0
+        # Unshuffle the mask to match the original patch order
+        mask = torch.gather(mask, dim=1, index=ids_restore)
 
-        # Create binary mask: 1 is keep, 0 is remove
-        mask = torch.zeros(N, L, device=x.device) # Initialize mask with zeros
-        mask[:, :len_keep] = 1 # Set the visible patches to 1 as a flag to keep them unmaksed
-        mask = torch.gather(mask, dim=1, index=ids_restore) # Restore the original order
+        # Mask the input patches
+        x_masked = torch.gather(x, dim=1, index=ids_keep.unsqueeze(-1).repeat(1, 1, D))
 
         print(f"RandomMasking - Input patches shape: {x.shape}")
         print(f"RandomMasking - Mask shape: {mask.shape}")
         print(f"RandomMasking - ids_restore shape: {ids_restore.shape}")
-
-        # Apply mask to input
-        x_masked = torch.gather(x, dim=1, index=ids_keep.unsqueeze(-1).repeat(1, 1, D)) # Gather the visible patches
-        print(f"RandomMasking -  Unmasked patches shape: {x_masked.shape}")
+        print(f"RandomMasking - Unmasked patches shape: {x_masked.shape}")
 
         return x_masked, mask, ids_restore
 
-def unpatchify(patches, img_size=(224,224), patch_size=16, original_num_patches=196, save_dir='./unpatchify_debug'):
+def unpatchify(patches, img_size=(224, 224), patch_size=16):
     '''
     Reconstructs the image from patches.
-    
+
     Args:
         patches (torch.Tensor): The output patches from the decoder
                                 (shape: [batch_size, num_patches, patch_size*patch_size*num_channels]).
         img_size (tuple): The original image size (height, width).
         patch_size (int): The size of each patch (assuming square patches).
-        
-    Returns:
-        torch.Tensor: The reconstructed image (shape: [batch_size, 3, height, width]).
-        torch.Tensor: The reconstructed depth map (shape: [batch_size, 1, height, width]).
 
+    Returns:
+        tuple: (reconstructed_rgb, reconstructed_depth)
+            reconstructed_rgb: [batch_size, 3, height, width]
+            reconstructed_depth: [batch_size, 1, height, width]
     '''
     batch_size, num_patches, patch_elements = patches.shape
-    num_channels_rgb = 3
-    num_channels_depth = 1
+    num_channels = patch_elements // (patch_size * patch_size)
+    assert num_channels == 4, "Expected 4 channels (RGB + Depth)"
+    assert patch_elements == patch_size * patch_size * num_channels, "Incorrect patch elements"
 
-    # Calculate the number of patches in each dimension for the original image
-    num_patches_height = img_size[0] // patch_size
-    num_patches_width = img_size[1] // patch_size
+    # Calculate the number of patches per dimension
+    num_patches_per_dim = img_size[0] // patch_size
+    assert num_patches_per_dim ** 2 == num_patches, "Number of patches does not match image dimensions"
 
-    # Calculate the elements per patch for RGB and depth
-    patch_elements_rgb = patch_size * patch_size * num_channels_rgb
-    patch_elements_depth = patch_size * patch_size * num_channels_depth
+    # Reshape patches into the image grid
+    patches = patches.view(batch_size, num_patches_per_dim, num_patches_per_dim, patch_size, patch_size, num_channels)
+    # Rearrange dimensions to match image shape
+    patches = patches.permute(0, 5, 1, 3, 2, 4).contiguous()
+    # Combine patches into full images
+    images = patches.view(batch_size, num_channels, img_size[0], img_size[1])
 
-    # Separate RGB and depth patches
-    patches_rgb = patches[:, :, :patch_elements_rgb]
-    patches_depth = patches[:, :, patch_elements_rgb:patch_elements_rgb + patch_elements_depth]
+    # Split the channels into RGB and depth
+    reconstructed_rgb = images[:, :3, :, :]
+    reconstructed_depth = images[:, 3:, :, :]
 
-    print(f"Unpatchify - RGB patches shape before reshaping: {patches_rgb.shape}")
-    print(f"Unpatchify - Depth patches shape before reshaping: {patches_depth.shape}")
-
-    # Visualize RGB patches for the first image in the batch
-    visualize_patches(patches_rgb[0], patch_size, "RGB", save_dir=save_dir, step=0)
-
-    # Reshape patches to match the original image dimensions
-    patches_rgb = patches_rgb.reshape(batch_size, num_patches, patch_size, patch_size, num_channels_rgb)
-    patches_rgb = patches_rgb.permute(0, 1, 3, 2, 4).contiguous()
-    
-    # Create a tensor of zeros for the full image and fill in the visible patches
-    full_patches_rgb = torch.zeros(batch_size, original_num_patches, patch_size, patch_size, num_channels_rgb, device=patches_rgb.device)
-    full_patches_rgb[:, :num_patches] = patches_rgb
-    
-    # Reshape to the original image dimensions
-    reconstructed_rgb = full_patches_rgb.reshape(batch_size, num_patches_height, num_patches_width, patch_size, patch_size, num_channels_rgb)
-    reconstructed_rgb = reconstructed_rgb.permute(0, 5, 1, 3, 2, 4).contiguous()
-    reconstructed_rgb = reconstructed_rgb.reshape(batch_size, num_channels_rgb, img_size[0], img_size[1])
-
-    # Repeat the process for depth patches
-    if patches_depth.shape[2] > 0:
-        patches_depth = patches_depth.reshape(batch_size, num_patches, patch_size, patch_size, num_channels_depth)
-        patches_depth = patches_depth.permute(0, 1, 3, 2, 4).contiguous()
-        
-        full_patches_depth = torch.zeros(batch_size, original_num_patches, patch_size, patch_size, num_channels_depth, device=patches_depth.device)
-        full_patches_depth[:, :num_patches] = patches_depth
-        
-        reconstructed_depth = full_patches_depth.reshape(batch_size, num_patches_height, num_patches_width, patch_size, patch_size, num_channels_depth)
-        reconstructed_depth = reconstructed_depth.permute(0, 5, 1, 3, 2, 4).contiguous()
-        reconstructed_depth = reconstructed_depth.reshape(batch_size, num_channels_depth, img_size[0], img_size[1])
-    else:
-        reconstructed_depth = torch.zeros(batch_size, num_channels_depth, img_size[0], img_size[1], device=patches_rgb.device)
-
-    print(f"Unpatchify - RGB image shape after reshaping: {reconstructed_rgb.shape}")
-    print(f"Unpatchify - Depth image shape after reshaping: {reconstructed_depth.shape}")
+    print(f"Unpatchify - Reconstructed RGB image shape: {reconstructed_rgb.shape}")
+    print(f"Unpatchify - Reconstructed Depth image shape: {reconstructed_depth.shape}")
 
     return reconstructed_rgb, reconstructed_depth
 
 
-def visualize_patches(patches, patch_size, label, save_dir='./unpatchify_debug', step=0):
+
+def visualize_patches(patches, patch_size, num_channels, label, save_dir='./unpatchify_debug', step=0):
     """
     Visualize the individual patches for debugging.
+
     Args:
-        patches (torch.Tensor): Tensor of patches.
+        patches (torch.Tensor): Tensor of patches (num_patches, patch_elements).
         patch_size (int): Size of each patch.
+        num_channels (int): Number of channels in the patches.
         label (str): Label for the plot.
         save_dir (str): Directory to save the visualization.
         step (int): Current step/epoch for naming files.
@@ -153,13 +129,18 @@ def visualize_patches(patches, patch_size, label, save_dir='./unpatchify_debug',
     os.makedirs(save_dir, exist_ok=True)
     num_patches = patches.shape[0]
     grid_size = int(num_patches ** 0.5)
+    assert grid_size * grid_size == num_patches, "Number of patches must be a perfect square"
+
     fig, axes = plt.subplots(grid_size, grid_size, figsize=(8, 8))
-    for i in range(grid_size):
-        for j in range(grid_size):
-            # Detach the tensor from the graph and convert it to numpy
-            patch = patches[i * grid_size + j].detach().view(patch_size, patch_size, -1).cpu().numpy()
-            axes[i, j].imshow(patch)
-            axes[i, j].axis('off')
+    for idx, ax in enumerate(axes.flatten()):
+        if idx >= num_patches:
+            break
+        patch = patches[idx].detach().cpu()
+        patch = patch.view(patch_size, patch_size, num_channels).numpy()
+        # Normalize patch for visualization
+        patch = (patch - patch.min()) / (patch.max() - patch.min() + 1e-5)
+        ax.imshow(patch)
+        ax.axis('off')
     plt.suptitle(f"{label} Patches")
     filename = os.path.join(save_dir, f"{label}_patches_step_{step}.png")
     plt.savefig(filename)

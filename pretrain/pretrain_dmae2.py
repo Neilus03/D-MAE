@@ -98,65 +98,55 @@ def train_one_epoch(model, dataloader, optimizer, device):
     return avg_loss, avg_rgb_loss, avg_depth_loss
 
 
-def visualize_reconstruction(original, reconstructed_image, reconstructed_depth, mask, epoch):
+def visualize_reconstruction(original, reconstructed_rgb, reconstructed_depth, mask, epoch):
     '''
     Visualizes the original, masked, and reconstructed images and depth maps and logs them to WandB.
-    
+
     Args:
-        original (torch.Tensor): The original input image tensor, which includes RGB and depth channels.
-        reconstructed_image (torch.Tensor): The reconstructed RGB image tensor output from the model.
-        reconstructed_depth (torch.Tensor): The reconstructed depth map tensor output from the model.
+        original (torch.Tensor): The original input image tensor (4, H, W).
+        reconstructed_rgb (torch.Tensor): The reconstructed RGB image tensor (3, H, W).
+        reconstructed_depth (torch.Tensor): The reconstructed depth map tensor (1, H, W).
         mask (torch.Tensor): The mask tensor indicating which patches were masked during training.
         epoch (int): The current epoch number, used for logging in WandB.
     '''
-    # Create a 2x2 grid of subplots for displaying the images
+    # Denormalize the original RGB image
+    original_rgb = denormalize_RGB(original[:3, :, :].cpu().detach()).permute(1, 2, 0).numpy()
+    # Get the original depth map
+    original_depth = original[3, :, :].cpu().detach().numpy()
+
+    # Denormalize the reconstructed RGB image
+    reconstructed_rgb = denormalize_RGB(reconstructed_rgb.cpu().detach()).permute(1, 2, 0).numpy()
+    # Get the reconstructed depth map
+    reconstructed_depth = reconstructed_depth.cpu().detach().squeeze().numpy()
+
+    # Create a 2x2 grid of subplots
     fig, axs = plt.subplots(2, 2, figsize=(12, 12))
-
-    # Check the dimensionality of the original input tensor
-    # If it is 4D (batch of images), extract the first image for visualization
-    if original.dim() == 4:
-        original_rgb = denormalize_RGB(original[:, :3, :, :].cpu()).permute(1, 2, 0).numpy()  # Extract and denormalize RGB channels
-        original_depth = original[:, 3, :, :].cpu().numpy()  # Extract the depth channel
-    elif original.dim() == 3:
-        # If the tensor is 3D, directly process it as a single image
-        original_rgb = denormalize_RGB(original[:3, :, :].cpu()).permute(1, 2, 0).numpy()  # Extract and denormalize RGB channels
-        original_depth = original[3, :, :].cpu().numpy()  # Extract the depth channel
-
-    # Process the reconstructed images
-    # Denormalize the reconstructed RGB image and move the channels to the last dimension
-    reconstructed_rgb = denormalize_RGB(reconstructed_image.detach().cpu()).permute(1, 2, 0).numpy()
-    
-    # Squeeze the reconstructed depth map to remove unnecessary dimensions
-    reconstructed_depth = reconstructed_depth.detach().cpu().squeeze().numpy()  # Squeeze depth to (224, 224)
 
     # Plot the original RGB image
     axs[0, 0].imshow(original_rgb)
     axs[0, 0].set_title("Original RGB Image")
-    axs[0, 0].axis('off')  # Turn off the axis for better visualization
+    axs[0, 0].axis('off')
 
     # Plot the original depth map
-    axs[1, 0].imshow(original_depth, cmap='viridis')  # Use a colormap for depth visualization
+    axs[1, 0].imshow(original_depth, cmap='viridis')
     axs[1, 0].set_title("Original Depth Map")
-    axs[1, 0].axis('off')  # Turn off the axis for better visualization
+    axs[1, 0].axis('off')
 
     # Plot the reconstructed RGB image
     axs[0, 1].imshow(reconstructed_rgb)
     axs[0, 1].set_title("Reconstructed RGB Image")
-    axs[0, 1].axis('off')  # Turn off the axis for better visualization
+    axs[0, 1].axis('off')
 
     # Plot the reconstructed depth map
-    axs[1, 1].imshow(reconstructed_depth, cmap='viridis')  # Use a colormap for depth visualization
+    axs[1, 1].imshow(reconstructed_depth, cmap='viridis')
     axs[1, 1].set_title("Reconstructed Depth Map")
-    axs[1, 1].axis('off')  # Turn off the axis for better visualization
+    axs[1, 1].axis('off')
 
-    # Adjust layout to avoid overlapping and improve spacing
+    # Adjust layout and log to wandb
     plt.tight_layout()
-
-    # Log the entire figure as an image to WandB for visualization and tracking
     wandb.log({f"Reconstruction at Epoch {epoch}": wandb.Image(fig)})
-
-    # Close the figure to free up memory and avoid display issues
     plt.close(fig)
+
 
     
     
