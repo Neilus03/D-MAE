@@ -59,9 +59,21 @@ class CustomDataset(Dataset):
             depth = self.transform_depth(depth)
 
         # Concatenate the depth map as the 4th channel
-        image_depth = torch.cat((image, depth), dim=0)
+        image_depth = torch.cat((image, depth), dim=0)  # shape: (4, H, W)
 
-        return image_depth
+        # Extract patches from the image_depth tensor
+        patch_size = 16  # Each patch is 16x16
+        # Ensure the image dimensions are divisible by the patch size
+        _, H, W = image_depth.shape
+        if H % patch_size != 0 or W % patch_size != 0:
+            raise ValueError(f"Image dimensions ({H}, {W}) are not divisible by patch size ({patch_size})")
+
+        # Unfold the image to get patches
+        patches = image_depth.unfold(1, patch_size, patch_size).unfold(2, patch_size, patch_size)
+        # Rearrange dimensions to get patches in (num_patches, channels, patch_size, patch_size)
+        patches = patches.permute(1, 2, 0, 3, 4).contiguous().view(-1, 4, patch_size, patch_size)  # shape: (196, 4, 16, 16)
+
+        return image_depth, patches
 
 def get_dataloaders(config):
     '''
@@ -85,7 +97,7 @@ def get_dataloaders(config):
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
 
-    depth_mean= config['data']['depth_stats']['mean']
+    depth_mean = config['data']['depth_stats']['mean']
     depth_std = config['data']['depth_stats']['std']
     transform_depth = transforms.Compose([
         transforms.Resize(image_size),
@@ -108,31 +120,14 @@ def get_dataloaders(config):
 
 def denormalize_RGB(tensor):
     '''
-    Denormalizes a tensor containing an RGB image
-    
-    '''
-    if isinstance(tensor, np.ndarray):
-        tensor = torch.from_numpy(tensor)
-    
-    mean = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1)
-    std = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1)
-    return tensor * std + mean
-
-def denormalize_RGB(tensor):
-    '''
     Denormalizes the RGB channels of a tensor containing an RGB or RGB-D image
     '''
     if isinstance(tensor, np.ndarray):
         tensor = torch.from_numpy(tensor)
     
-    print(f'DENORMALIZE - input tensor shape: {tensor.shape}')
-    
     mean = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1)
     std = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1)
     
-    print(f'DENORMALIZE - mean shape: {mean.shape}')
-    print(f'DENORMALIZE - std shape: {std.shape}')
-
     # Check if the input is a 4D tensor (batch, channels, height, width)
     if tensor.dim() == 4:
         # Only denormalize the first 3 channels (RGB)
@@ -145,31 +140,28 @@ def denormalize_RGB(tensor):
             denormalized_tensor = denormalized_rgb
     else:
         # For 3D tensors (single image)
-        if tensor.shape[0] == 4:
+        if tensor.shape[0] >= 3:
             denormalized_rgb = tensor[:3] * std + mean
-            denormalized_tensor = torch.cat([denormalized_rgb, tensor[3:]], dim=0)
+            if tensor.shape[0] == 4:
+                denormalized_tensor = torch.cat([denormalized_rgb, tensor[3:]], dim=0)
+            else:
+                denormalized_tensor = denormalized_rgb
         else:
             denormalized_tensor = tensor * std + mean
-    
-    print(f'DENORMALIZE - denormalized_tensor shape: {denormalized_tensor.shape}')
-    
-    return denormalized_tensor
 
-###########################################################################
-# ANALYZE THE MEAN AND STD OF THE DEPTH MAPS TO NOW HOW TO NORMALIZE THEM #
-###########################################################################
+    return denormalized_tensor
 
 def analyze_depth_stats(loader):
     depth_min, depth_max = float('inf'), float('-inf')
     depth_sum, depth_sq_sum, count = 0, 0, 0
 
-    for batch in loader:
-        depth = batch[:, 3]  # Assuming depth is the 4th channel
+    for image_depths, _ in loader:
+        depth = image_depths[:, 3]  # Assuming depth is the 4th channel
         depth_min = min(depth_min, depth.min().item())
         depth_max = max(depth_max, depth.max().item())
         depth_sum += depth.sum().item()
         depth_sq_sum += (depth ** 2).sum().item()
-        count += depth.numel()
+        count += depth.numel() / depth.shape[1]  # Adjust for batch size
 
     depth_mean = depth_sum / count
     depth_std = (depth_sq_sum / count - depth_mean ** 2) ** 0.5
@@ -186,30 +178,105 @@ if __name__ == "__main__":
     train_loader, val_loader = get_dataloaders(config)
 
     logger.info("Analyzing training data:")
-    for i, batch in enumerate(train_loader):
+    for i, (image_depths, patches) in enumerate(train_loader):
         logger.info(f"Batch {i+1}:")
-        logger.info(f"  Shape: {batch.shape}")
-        logger.info(f"  Data type: {batch.dtype}")
-        logger.info(f"  RGB value range: [{batch[:, :3].min():.4f}, {batch[:, :3].max():.4f}]")
-        logger.info(f"  Depth value range: [{batch[:, 3].min():.4f}, {batch[:, 3].max():.4f}]")
+        logger.info(f"  image_depths Shape: {image_depths.shape}")  # Shape: (batch_size, 4, H, W)
+        logger.info(f"  patches Shape: {patches.shape}")  # Shape: (batch_size, 196, 4, 16, 16)
+        logger.info(f"  Data type: {image_depths.dtype}")
+        logger.info(f"  RGB value range: [{image_depths[:, :3].min():.4f}, {image_depths[:, :3].max():.4f}]")
+        logger.info(f"  Depth value range: [{image_depths[:, 3].min():.4f}, {image_depths[:, 3].max():.4f}]")
         
         if i == 0:
-            # Visualize first image and depth map
+            # Visualize and save the first image and depth map
             import matplotlib.pyplot as plt
-            plt.figure(figsize=(10, 5))
-            plt.subplot(121)
-            plt.imshow(denormalize_RGB(batch[0, :3]).permute(1, 2, 0).clamp(0, 1).numpy())
-            plt.title("RGB Image")
-            plt.subplot(122)
-            plt.imshow(batch[0, 3].numpy(), cmap='viridis')
-            plt.title("Depth Map")
-            plt.savefig('sample_data_visualization.png')
-            plt.close()
+            import os
+            import numpy as np
+
+            # Create a directory to save images
+            os.makedirs('sample_images', exist_ok=True)
+
+            # Denormalize RGB image
+            rgb_image = denormalize_RGB(image_depths[0, :3]).permute(1, 2, 0).clamp(0, 1).numpy()
+            # Denormalize depth map
+            depth_mean = config['data']['depth_stats']['mean']
+            depth_std = config['data']['depth_stats']['std']
+            depth_map = image_depths[0, 3].numpy()
+            depth_map = depth_map * depth_std + depth_mean
+
+            # Save RGB image
+            plt.imsave('sample_images/original_rgb_image.png', rgb_image)
+            # Save depth map
+            plt.imsave('sample_images/original_depth_map.png', depth_map, cmap='viridis')
+
+            # Save first few patches
+            num_patches_to_save = 5
+            for j in range(num_patches_to_save):
+                patch = patches[0, j]  # First image in batch, patch j
+                # Denormalize RGB channels of the patch
+                patch_rgb = denormalize_RGB(patch[:3]).permute(1, 2, 0).clamp(0, 1).numpy()
+                # Depth channel of the patch
+                patch_depth = patch[3].numpy()
+                # Denormalize depth
+                patch_depth = patch_depth * depth_std + depth_mean
+
+                # Save RGB patch
+                plt.imsave(f'sample_images/patch_{j}_rgb.png', patch_rgb)
+                # Save depth patch
+                plt.imsave(f'sample_images/patch_{j}_depth.png', patch_depth, cmap='viridis')
+
+            # Reconstruct image from patches with gaps between patches
+            # Define gap size
+            gap_size = 2  # pixels
+            num_patches_per_row = 14
+            patch_size = 16
+            grid_size = num_patches_per_row * patch_size + (num_patches_per_row - 1) * gap_size
+
+            # Initialize empty arrays with gaps
+            reconstructed_rgb_with_gaps = np.ones((grid_size, grid_size, 3))
+            reconstructed_depth_with_gaps = np.ones((grid_size, grid_size))
+
+            # Get denormalized patches
+            patches_rgb = denormalize_RGB(patches[0, :, :3]).clamp(0, 1).numpy()  # Shape: (196, 3, 16, 16)
+            patches_depth = patches[0, :, 3].numpy()  # Shape: (196, 16, 16)
+            patches_depth = patches_depth * depth_std + depth_mean
+
+            # Fill the reconstructed images with patches and gaps
+            idx = 0
+            for row in range(num_patches_per_row):
+                for col in range(num_patches_per_row):
+                    y_start = row * (patch_size + gap_size)
+                    x_start = col * (patch_size + gap_size)
+                    reconstructed_rgb_with_gaps[y_start:y_start+patch_size, x_start:x_start+patch_size, :] = patches_rgb[idx].transpose(1, 2, 0)
+                    reconstructed_depth_with_gaps[y_start:y_start+patch_size, x_start:x_start+patch_size] = patches_depth[idx]
+                    idx += 1
+
+            # Save reconstructed images with gaps
+            plt.imsave('sample_images/reconstructed_rgb_with_gaps.png', reconstructed_rgb_with_gaps)
+            plt.imsave('sample_images/reconstructed_depth_with_gaps.png', reconstructed_depth_with_gaps, cmap='viridis')
+
+            # Also save the reconstructed image without gaps for comparison
+            # Reshape patches into grid
+            patches_image = patches[0]  # Shape: (196, 4, 16, 16)
+            # Reshape to (14,14,4,16,16)
+            patches_image = patches_image.view(14, 14, 4, 16, 16)
+            # Permute to (4, 14, 16, 14, 16)
+            patches_image = patches_image.permute(2, 0, 3, 1, 4)
+            # Reshape to (4, H, W)
+            reconstructed_image = patches_image.contiguous().view(4, 14*16, 14*16)
+
+            # Denormalize and save reconstructed RGB image
+            reconstructed_rgb_image = denormalize_RGB(reconstructed_image[:3]).permute(1, 2, 0).clamp(0, 1).numpy()
+            plt.imsave('sample_images/reconstructed_rgb_image.png', reconstructed_rgb_image)
+            # Reconstructed depth map
+            reconstructed_depth_map = reconstructed_image[3].numpy()
+            # Denormalize depth
+            reconstructed_depth_map = reconstructed_depth_map * depth_std + depth_mean
+            plt.imsave('sample_images/reconstructed_depth_map.png', reconstructed_depth_map, cmap='viridis')
 
         if i == 4:  # Check first 5 batches
             break
 
     logger.info("Calculating depth statistics for entire dataset...")
-    depth_mean, depth_std = analyze_depth_stats(train_loader)
+    #depth_mean, depth_std = analyze_depth_stats(train_loader)
 
     logger.info("Data loading and analysis complete.")
