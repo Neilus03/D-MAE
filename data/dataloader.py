@@ -118,6 +118,7 @@ def get_dataloaders(config):
 
     return train_loader, val_loader
 
+
 def denormalize_RGB(tensor):
     '''
     Denormalizes the RGB channels of a tensor containing an RGB or RGB-D image
@@ -125,8 +126,8 @@ def denormalize_RGB(tensor):
     if isinstance(tensor, np.ndarray):
         tensor = torch.from_numpy(tensor)
     
-    mean = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1)
-    std = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1)
+    mean = torch.tensor([0.485, 0.456, 0.406], device=tensor.device).view(3, 1, 1)
+    std = torch.tensor([0.229, 0.224, 0.225], device=tensor.device).view(3, 1, 1)
     
     # Check if the input is a 4D tensor (batch, channels, height, width)
     if tensor.dim() == 4:
