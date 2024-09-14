@@ -7,7 +7,9 @@ import wandb
 import matplotlib.pyplot as plt
 import numpy as np
 import io
-from PIL import Image  
+import safetensors.torch  # Added for safetensors support
+from safetensors import safe_open
+
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '../'))
 
@@ -21,7 +23,6 @@ with open(config_path, 'r') as file:
 
 # Initialize WandB
 wandb.init(project=config['logging']['wandb_project'], entity=config['logging']['wandb_entity'])
-
 
 
 def extract_patches(image, patch_size):
@@ -305,16 +306,29 @@ def main():
     model = MAE(d_model, img_size, patch_size, n_channels)
     model.to(device)
     
+    
+    # Load model if checkpoint exists
+    checkpoint_dir = config['logging']['model_save_dir']
+    os.makedirs(checkpoint_dir, exist_ok=True)
+    checkpoint_path = os.path.join(checkpoint_dir, 'best_model.safetensors')
+    start_epoch = 0
+    best_val_loss = float('inf')
+    if os.path.exists(checkpoint_path):
+        state_dict = safetensors.torch.load_file(checkpoint_path)
+        model.load_state_dict(state_dict['model_state_dict'])
+        start_epoch = state_dict['epoch'] + 1
+        best_val_loss = state_dict['best_val_loss']
+        print(f"Loaded checkpoint from {checkpoint_path}, starting from epoch {start_epoch}")
+    
     # Log model parameters
     wandb.log({'Number of Parameters': count_parameters(model)})
-    
     
     # Optimizer
     optimizer = optim.Adam(model.parameters(), lr=config['training']['learning_rate'])
 
     num_epochs = config['training']['num_epochs']
 
-    for epoch in range(num_epochs):
+    for epoch in range(start_epoch, num_epochs):
         # Training
         train_loss, train_rgb_loss, train_depth_loss = train_epoch(model, train_loader, optimizer, epoch, device)
 
@@ -332,12 +346,16 @@ def main():
             'Validation Depth Loss': val_depth_loss
         })
 
-        # Save model checkpoint
-        checkpoint_dir = config['logging']['model_save_dir']
-        os.makedirs(checkpoint_dir, exist_ok=True)
-        checkpoint_path = os.path.join(checkpoint_dir, f'mae_epoch_{epoch}.pth')
-        torch.save(model.state_dict(), checkpoint_path)
-        print(f"Saved model checkpoint at {checkpoint_path}")
+        # Save model checkpoint if validation loss improves
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            state_dict = {
+                'model_state_dict': model.state_dict(),
+                'epoch': epoch,
+                'best_val_loss': best_val_loss
+            }
+            safetensors.torch.save_file(state_dict, checkpoint_path)
+            print(f"Saved best model checkpoint at {checkpoint_path}")
 
     # Finish WandB run
     wandb.finish()
