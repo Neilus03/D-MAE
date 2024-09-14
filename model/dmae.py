@@ -249,7 +249,7 @@ class MAE(nn.Module):
         return pred, mask, ids_restore, reconstructed_image, reconstructed_depth, x_patched, x_masked
 
 
-def mae_loss(pred, target, mask, alpha=10.0, beta=1.0):
+def mae_loss(pred, target, mask):
     """
     Calculates the MAE loss for a masked autoencoder, considering separate 
     losses for RGB and depth channels in the patch-based representation.
@@ -275,6 +275,8 @@ def mae_loss(pred, target, mask, alpha=10.0, beta=1.0):
     #print(f"MAE LOSS - mask shape: {mask.shape}")
 
     patch_size = config['model']['patch_size']
+    alpha = config['training']['alpha']
+    beta = config['training']['beta']
     num_channels_rgb = 3
     num_channels_depth = 1
     
