@@ -9,6 +9,7 @@ import numpy as np
 import io
 import safetensors.torch  # Added for safetensors support
 from safetensors import safe_open
+from PIL import Image
 
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '../'))
