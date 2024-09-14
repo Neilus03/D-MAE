@@ -22,6 +22,8 @@ with open(config_path, 'r') as file:
 # Initialize WandB
 wandb.init(project=config['logging']['wandb_project'], entity=config['logging']['wandb_entity'])
 
+
+
 def extract_patches(image, patch_size):
     '''
     Extract patches from an image tensor.
@@ -283,6 +285,9 @@ def validate_epoch(model, dataloader, epoch, device):
     print(f"Validation Epoch {epoch} - Avg Loss: {avg_loss:.4f}, Avg RGB Loss: {avg_rgb_loss:.4f}, Avg Depth Loss: {avg_depth_loss:.4f}")
     return avg_loss, avg_rgb_loss, avg_depth_loss
 
+def count_parameters(model):
+    return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
 def main():
     # Device configuration
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -295,10 +300,15 @@ def main():
     img_size = config['model']['image_size']
     patch_size = config['model']['patch_size']
     n_channels = config['model']['n_channels']
-
+    
+    # Initialize model
     model = MAE(d_model, img_size, patch_size, n_channels)
     model.to(device)
-
+    
+    # Log model parameters
+    wandb.log({'Number of Parameters': count_parameters(model)})
+    
+    
     # Optimizer
     optimizer = optim.Adam(model.parameters(), lr=config['training']['learning_rate'])
 
