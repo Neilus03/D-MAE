@@ -152,6 +152,16 @@ def denormalize_RGB(tensor):
 
     return denormalized_tensor
 
+def denormalize_depth(tensor, mean, std):
+    '''
+    Denormalizes the depth channel of a tensor containing an RGB-D image
+    '''
+    if isinstance(tensor, np.ndarray):
+        tensor = torch.from_numpy(tensor)
+    
+    denormalized_depth = tensor * std + mean
+    return denormalized_depth
+
 def analyze_depth_stats(loader):
     depth_min, depth_max = float('inf'), float('-inf')
     depth_sum, depth_sq_sum, count = 0, 0, 0

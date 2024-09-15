@@ -14,7 +14,7 @@ from PIL import Image
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '../'))
 
-from data.dataloader import get_dataloaders, denormalize_RGB
+from data.dataloader import get_dataloaders, denormalize_RGB, denormalize_depth
 from model.dmae import MAE, mae_loss
 
 # Load configuration
@@ -54,19 +54,26 @@ def assemble_patches_with_gaps(patches, gap_size, num_patches_per_row, patch_siz
     Returns:
         image_with_gaps: numpy array of shape (grid_size, grid_size, num_channels) or (grid_size, grid_size)
     '''
-    grid_size = num_patches_per_row * patch_size + (num_patches_per_row - 1) * gap_size
+    #define the grid size as the size of the image with gaps
+    grid_size = num_patches_per_row * patch_size + (num_patches_per_row - 1) * gap_size # in pixels
     if depth:
+        #for depth use a single channel
         image_with_gaps = np.ones((grid_size, grid_size))
     else:
+        #for RGB use 3 channels
         image_with_gaps = np.ones((grid_size, grid_size, num_channels))
     idx = 0
+    #iterate over the patches and place them in the image with gaps
     for row in range(num_patches_per_row):
         for col in range(num_patches_per_row):
+            #calculate the start position of the patch
             y_start = row * (patch_size + gap_size)
             x_start = col * (patch_size + gap_size)
             if depth:
+                #for depth maps we only have one channel
                 image_with_gaps[y_start:y_start+patch_size, x_start:x_start+patch_size] = patches[idx]
             else:
+                #for RGB images we have 3 channels
                 image_with_gaps[y_start:y_start+patch_size, x_start:x_start+patch_size, :] = patches[idx].transpose(1, 2, 0)
             idx += 1
     return image_with_gaps
@@ -127,13 +134,15 @@ def log_visualizations(image_depths, reconstructed_image, reconstructed_depth, m
     masked_indices = (mask[0] == 1).nonzero(as_tuple=False).squeeze()
     masked_patches[masked_indices] = 0  # Set masked patches to zero
 
-    masked_patches_rgb = masked_patches[:, :3, :, :]
-    masked_patches_depth = masked_patches[:, 3:, :, :]
+    # Extract masked patches for rgb and depth separately
+    masked_patches_rgb = masked_patches[:, :3, :, :] # Shape: (num_patches, 3, patch_size, patch_size)
+    masked_patches_depth = masked_patches[:, 3:, :, :] # Shape: (num_patches, 1, patch_size, patch_size)
 
     # Denormalize masked patches
     masked_patches_rgb_denorm = denormalize_RGB(masked_patches_rgb).clamp(0, 1).numpy()
     masked_patches_depth_denorm = masked_patches_depth.numpy()
-    masked_patches_depth_denorm = masked_patches_depth_denorm * depth_std + depth_mean
+    # Denormalize masked depth patches
+    masked_patches_depth_denorm = denormalize_depth(masked_patches_depth, depth_mean, depth_std)
     masked_patches_depth_denorm = masked_patches_depth_denorm.squeeze(1)
 
     # Normalize masked depth patches for visualization
@@ -209,6 +218,19 @@ def log_visualizations(image_depths, reconstructed_image, reconstructed_depth, m
     })
 
 def train_epoch(model, dataloader, optimizer, epoch, device):
+    '''
+    Runs one epoch of training.
+    Args:
+        model: DMAE model
+        dataloader: training dataloader
+        optimizer: optimizer
+        epoch: current epoch
+        device: device to run the model
+    Returns:
+        avg_loss: average loss over the epoch
+        avg_rgb_loss: average RGB loss over the epoch
+        avg_depth_loss: average depth loss over the epoch
+    '''
     model.train()
     total_loss = 0
     total_rgb_loss = 0
@@ -255,6 +277,18 @@ def train_epoch(model, dataloader, optimizer, epoch, device):
     return avg_loss, avg_rgb_loss, avg_depth_loss
 
 def validate_epoch(model, dataloader, epoch, device):
+    '''
+    Runs one epoch of validation.
+    Args:
+        model: DMAE model
+        dataloader: validation dataloader
+        epoch: current epoch
+        device: device to run the model
+    Returns:
+        avg_loss: average loss over the epoch
+        avg_rgb_loss: average RGB loss over the epoch
+        avg_depth_loss: average depth loss over the epoch
+    '''
     model.eval()
     total_loss = 0
     total_rgb_loss = 0
