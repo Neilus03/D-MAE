@@ -29,6 +29,7 @@ data:
 logging:
   wandb_project: depth_informed_mae
   wandb_entity: neilus03
+  wandb_run_name: depth_informed_mae
   model_save_dir: /home/ndelafuente/D-MAE/depth_informed_mae/pretrain/checkpoints
   val_log_interval: 1
   train_viz_log_interval: 10

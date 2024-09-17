@@ -24,7 +24,7 @@ with open(config_path, 'r') as file:
     config = yaml.safe_load(file)
 
 # Initialize WandB
-wandb.init(project=config['logging']['wandb_project'], entity=config['logging']['wandb_entity'])
+wandb.init(project=config['logging']['wandb_project'], entity=config['logging']['wandb_entity'], name=config['logging']['wandb_run_name'])
 
 
 def train_epoch(model, dataloader, optimizer, epoch, device):
