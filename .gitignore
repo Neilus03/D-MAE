@@ -3,7 +3,7 @@
 *.npy
 *.npz
 *.json
-*.txt
+
 *.log
 *.pyc
 *.wandb
