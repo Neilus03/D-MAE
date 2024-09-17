@@ -73,7 +73,7 @@ class CustomDataset(Dataset):
         # Rearrange dimensions to get patches in (num_patches, channels, patch_size, patch_size)
         patches = patches.permute(1, 2, 0, 3, 4).contiguous().view(-1, 4, patch_size, patch_size)  # shape: (196, 4, 16, 16)
 
-        return image_depth, patches
+        return image_depth, patches  # shape: (4, H, W), (196, 4, 16, 16)
 
 def get_dataloaders(config):
     '''
